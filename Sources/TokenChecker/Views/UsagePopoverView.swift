@@ -16,14 +16,15 @@ struct UsagePopoverView: View {
                 loginAction: { viewModel.openClaudeLogin() }
             )
 
-            Divider()
-
-            ServiceSectionView(
-                title: "Codex",
-                brand: .codex,
-                result: viewModel.snapshot.codex,
-                loginAction: { viewModel.openCodexLogin() }
-            )
+            ForEach(viewModel.snapshot.codexAccounts, id: \.label) { account in
+                Divider()
+                ServiceSectionView(
+                    title: account.label,
+                    brand: .codex,
+                    result: account.result,
+                    loginAction: { viewModel.openCodexLogin(home: account.home) }
+                )
+            }
 
             Divider()
             settingsBlock

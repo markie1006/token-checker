@@ -9,6 +9,7 @@
 actor CodexAppServerClient {
     private let candidates: [String]
     private let requestTimeout: TimeInterval
+    private let codexHome: String?
 
     private var nextId = 1
     private var pending: [Int: CheckedContinuation<RPCInbound, Error>] = [:]
@@ -19,6 +20,7 @@ actor CodexAppServerClient {
     private var lineBuffer = JSONRPCLineBuffer()
 
     init(
+        codexHome: String? = nil,
         candidates: [String] = [
             "/opt/homebrew/bin/codex",
             "/usr/local/bin/codex",
@@ -26,6 +28,7 @@ actor CodexAppServerClient {
         ],
         requestTimeout: TimeInterval = 8
     ) {
+        self.codexHome = codexHome
         self.candidates = candidates
         self.requestTimeout = requestTimeout
     }
@@ -44,7 +47,7 @@ actor CodexAppServerClient {
 
         proc.executableURL = executable
         proc.arguments = ["app-server"]
-        proc.environment = Self.childEnvironment(from: ProcessInfo.processInfo.environment)
+        proc.environment = Self.childEnvironment(from: ProcessInfo.processInfo.environment, codexHome: codexHome)
         proc.standardInput = inP
         proc.standardOutput = outP
         proc.standardError = errP
@@ -127,14 +130,14 @@ actor CodexAppServerClient {
     /// 起動した場合に `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `AWS_*` 等の秘密が
     /// 子に渡ってしまう。codex 自身が必要とするのは PATH と HOME 程度なので、
     /// それ以外は意図的に渡さない。
-    private static func childEnvironment(from base: [String: String]) -> [String: String] {
+    private static func childEnvironment(from base: [String: String], codexHome: String?) -> [String: String] {
         // codex が動くのに必要な最小キーだけ通す
         let allowedKeys: Set<String> = [
             "HOME", "USER", "LOGNAME", "SHELL",
             "LANG", "LC_ALL", "LC_CTYPE",
             "TMPDIR",
             "XDG_CONFIG_HOME", "XDG_CACHE_HOME",
-            // codex CLI 固有
+            // codex CLI 固有（明示指定がない場合は親から継承）
             "CODEX_HOME",
         ]
         var env: [String: String] = [:]
@@ -148,6 +151,9 @@ actor CodexAppServerClient {
         var seen = Set<String>()
         let merged = (extras + basePathDirs).filter { seen.insert($0).inserted }.joined(separator: ":")
         env["PATH"] = merged
+
+        // 明示的に指定されたアカウントディレクトリで上書き
+        if let home = codexHome { env["CODEX_HOME"] = home }
         return env
     }
 

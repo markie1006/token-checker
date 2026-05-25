@@ -8,7 +8,7 @@ final class UsageViewModel {
     // applicationWillTerminate から MainActor を経由せず shutdown を呼べるよう
     // nonisolated 化する。providers 自体は immutable なので Sendable 違反は起きない。
     private nonisolated let claudeProvider: UsageProvider
-    private nonisolated let codexProvider: UsageProvider
+    private nonisolated let codexEntries: [CodexEntry]
 
     var snapshot: UsageSnapshot = .empty
     var isLoading: Bool = false
@@ -16,12 +16,30 @@ final class UsageViewModel {
         didSet { persistInterval() }
     }
 
+    /// 複数 Codex アカウントを保持する内部型。
+    private nonisolated struct CodexEntry: Sendable {
+        let label: String
+        let home: String?
+        let provider: UsageProvider
+    }
+
     init(
         claudeProvider: UsageProvider = ClaudeUsageProvider(),
-        codexProvider: UsageProvider = CodexUsageProvider()
+        codexEntries: [(label: String, home: String?, provider: UsageProvider)]? = nil
     ) {
         self.claudeProvider = claudeProvider
-        self.codexProvider = codexProvider
+        if let overrides = codexEntries {
+            self.codexEntries = overrides.map { CodexEntry(label: $0.label, home: $0.home, provider: $0.provider) }
+        } else {
+            let config = AccountsConfig.load()
+            self.codexEntries = config.codexAccounts.map { account in
+                CodexEntry(
+                    label: account.label,
+                    home: account.home,
+                    provider: CodexUsageProvider(label: account.label, home: account.home)
+                )
+            }
+        }
         self.pollingInterval = Self.loadPersistedInterval()
     }
 
@@ -39,16 +57,12 @@ final class UsageViewModel {
     }
 
     /// アプリ終了時に子プロセスや永続接続を解放するためのクロージャを返す。
-    ///
-    /// `@MainActor` final class である自身を `@Sendable` クロージャがキャプチャできないため
-    /// (Swift 6 strict-concurrency でエラー)、Sendable な providers だけを閉じ込めて公開する。
-    /// AppDelegate.applicationWillTerminate からは MainActor を経由せず呼ばれる。
     nonisolated func makeShutdownHandler() -> @Sendable () async -> Void {
         let claude = claudeProvider
-        let codex = codexProvider
+        let entries = codexEntries
         return {
             await claude.shutdown()
-            await codex.shutdown()
+            for entry in entries { await entry.provider.shutdown() }
         }
     }
 
@@ -57,10 +71,10 @@ final class UsageViewModel {
         defer { isLoading = false }
 
         async let claude = fetchClaude()
-        async let codex = fetchCodex()
+        let codexResults = await fetchAllCodex()
 
-        let (c, x) = await (claude, codex)
-        snapshot = UsageSnapshot(claude: c, codex: x, fetchedAt: Date())
+        let c = await claude
+        snapshot = UsageSnapshot(claude: c, codexAccounts: codexResults, fetchedAt: Date())
     }
 
     private func fetchClaude() async -> Result<ServiceUsage, DomainError> {
@@ -74,41 +88,56 @@ final class UsageViewModel {
         }
     }
 
-    private func fetchCodex() async -> Result<ServiceUsage, DomainError> {
-        do {
-            return .success(try await codexProvider.fetch())
-        } catch let err as DomainError {
-            Logger.codex.error("fetch failed: \(err.localizedDescription)")
-            return .failure(err)
-        } catch {
-            return .failure(.network(error.localizedDescription))
+    /// 全 Codex アカウントを並列取得し、設定ファイルの順序で返す。
+    private func fetchAllCodex() async -> [CodexAccountSnapshot] {
+        let entries = codexEntries
+        return await withTaskGroup(of: (Int, CodexAccountSnapshot).self) { group in
+            for (index, entry) in entries.enumerated() {
+                group.addTask {
+                    do {
+                        let usage = try await entry.provider.fetch()
+                        return (index, CodexAccountSnapshot(label: entry.label, home: entry.home, result: .success(usage)))
+                    } catch let err as DomainError {
+                        Logger.codex.error("fetch failed [\(entry.label)]: \(err.localizedDescription)")
+                        return (index, CodexAccountSnapshot(label: entry.label, home: entry.home, result: .failure(err)))
+                    } catch {
+                        return (index, CodexAccountSnapshot(label: entry.label, home: entry.home, result: .failure(.network(error.localizedDescription))))
+                    }
+                }
+            }
+            var results: [(Int, CodexAccountSnapshot)] = []
+            for await r in group { results.append(r) }
+            return results.sorted(by: { $0.0 < $1.0 }).map(\.1)
         }
     }
 
     // MARK: - ログインボタン
 
-    /// どのサービスを再ログインするかは enum 型で表現する。
-    /// 任意文字列を AppleScript に渡せないようにしてインジェクションを「型として」不能にする。
-    enum LoginTarget {
-        case claude
-        case codex
+    func openClaudeLogin() {
+        spawnTerminalCommand("claude login")
+    }
 
-        var command: String {
-            switch self {
-            case .claude: return "claude login"
-            case .codex:  return "codex login"
+    /// Codex ログイン。`home` が指定されている場合は CODEX_HOME を前置する。
+    func openCodexLogin(home: String?) {
+        // CODEX_HOME のパスはユーザー自身の設定ファイル由来だが、
+        // AppleScript の文字列インジェクションを防ぐため英数字・パス文字のみ許可する。
+        if let home = home {
+            let allowedChars = CharacterSet.alphanumerics.union(.init(charactersIn: "/_\\-.~"))
+            guard home.unicodeScalars.allSatisfy({ allowedChars.contains($0) }) else {
+                Logger.ui.error("codex login: unsafe CODEX_HOME path rejected: \(home)")
+                return
             }
+            spawnTerminalCommand("CODEX_HOME=\(home) codex login")
+        } else {
+            spawnTerminalCommand("codex login")
         }
     }
 
-    func openClaudeLogin() { spawnLogin(.claude) }
-    func openCodexLogin()  { spawnLogin(.codex) }
-
-    private func spawnLogin(_ target: LoginTarget) {
+    private func spawnTerminalCommand(_ command: String) {
         let script = """
         tell application "Terminal"
             activate
-            do script "\(target.command)"
+            do script "\(command)"
         end tell
         """
         let process = Process()

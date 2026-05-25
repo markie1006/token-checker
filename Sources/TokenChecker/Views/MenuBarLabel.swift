@@ -19,7 +19,13 @@ struct MenuBarLabel: View {
 
     private var renderedImage: NSImage? {
         let claude = utilization(from: viewModel.snapshot.claude)
-        let codex = utilization(from: viewModel.snapshot.codex)
+        // 複数アカウントのうち最も使用率が高い 5h ウィンドウをメニューバーに表示する。
+        let codex = viewModel.snapshot.codexAccounts
+            .compactMap { account -> Double? in
+                guard case .success(let usage) = account.result else { return nil }
+                return usage.fiveHour?.utilization
+            }
+            .max()
         let content = HStack(spacing: 6) {
             HStack(spacing: 3) {
                 DonutChartView(

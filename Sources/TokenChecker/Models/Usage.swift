@@ -18,11 +18,19 @@ struct ServiceUsage: Equatable, Sendable {
     let weeklySonnet: RateLimit?
 }
 
-/// 取得結果。片方が失敗しても他方は表示できるよう個別に保持。
+/// Codex 1 アカウントぶんの取得結果。
+struct CodexAccountSnapshot: Equatable, Sendable {
+    let label: String
+    /// `CODEX_HOME` に渡したパス。nil = デフォルト (~/.codex)。ログイン時に使用。
+    let home: String?
+    let result: Result<ServiceUsage, DomainError>?
+}
+
+/// 全サービスの取得結果。片方が失敗しても他方は表示できるよう個別に保持。
 struct UsageSnapshot: Equatable, Sendable {
     let claude: Result<ServiceUsage, DomainError>?
-    let codex: Result<ServiceUsage, DomainError>?
+    let codexAccounts: [CodexAccountSnapshot]
     let fetchedAt: Date
 
-    static let empty = UsageSnapshot(claude: nil, codex: nil, fetchedAt: .distantPast)
+    static let empty = UsageSnapshot(claude: nil, codexAccounts: [], fetchedAt: .distantPast)
 }

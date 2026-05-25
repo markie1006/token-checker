@@ -81,14 +81,17 @@ struct ServiceSectionView: View {
     }
 
     private func secondaryRow(label: String, limit: RateLimit) -> some View {
-        HStack {
-            Text(label)
-                .font(.system(size: 11))
-                .foregroundStyle(.secondary)
-            Spacer()
-            Text("\(limit.percent)%")
-                .font(.system(size: 11))
-                .foregroundStyle(color(for: limit.utilization))
+        VStack(alignment: .leading, spacing: 3) {
+            HStack {
+                Text(label)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Text("\(limit.percent)%")
+                    .font(.system(size: 11))
+                    .foregroundStyle(color(for: limit.utilization))
+            }
+            ProgressBarView(value: limit.utilization, height: 3)
         }
     }
 

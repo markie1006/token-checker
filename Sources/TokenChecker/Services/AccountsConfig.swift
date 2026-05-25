@@ -29,8 +29,20 @@ struct AccountsConfig: Decodable, Sendable {
            let config = try? JSONDecoder().decode(AccountsConfig.self, from: data),
            !config.codexAccounts.isEmpty
         {
-            return config
+            return config.expandingTilde()
         }
         return AccountsConfig(codexAccounts: [CodexAccountEntry(label: "Codex", home: nil)])
+    }
+
+    /// `home` に含まれる先頭の `~` をホームディレクトリのフルパスに展開して返す。
+    private func expandingTilde() -> AccountsConfig {
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        let expanded = codexAccounts.map { entry in
+            let expandedHome = entry.home.map { path in
+                path.hasPrefix("~/") ? home + path.dropFirst(1) : path
+            }
+            return CodexAccountEntry(label: entry.label, home: expandedHome)
+        }
+        return AccountsConfig(codexAccounts: expanded)
     }
 }

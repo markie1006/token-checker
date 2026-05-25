@@ -72,6 +72,27 @@ struct UsagePopoverView: View {
                 .toggleStyle(.switch)
                 .controlSize(.mini)
             }
+
+            Divider()
+
+            Text("メニューバー表示")
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+
+            ForEach(viewModel.allServiceLabels, id: \.label) { item in
+                HStack {
+                    Text(item.displayName)
+                        .font(.system(size: 11))
+                    Spacer()
+                    Toggle("", isOn: Binding(
+                        get: { viewModel.isVisibleInMenuBar(item.label) },
+                        set: { viewModel.setVisibleInMenuBar(item.label, $0) }
+                    ))
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+                    .controlSize(.mini)
+                }
+            }
         }
     }
 

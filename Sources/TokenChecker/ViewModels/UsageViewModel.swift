@@ -16,6 +16,25 @@ final class UsageViewModel {
         didSet { persistInterval() }
     }
 
+    /// メニューバーに表示するサービスの ON/OFF。キーは "claude" または Codex のラベル名。
+    /// 未登録キーはデフォルト true（表示）として扱う。
+    var menuBarVisibility: [String: Bool] {
+        didSet { persistVisibility() }
+    }
+
+    /// 設定画面でトグルを並べるためのラベル一覧（Claude + 全 Codex アカウント）。
+    var allServiceLabels: [(label: String, displayName: String)] {
+        [("claude", "Claude Code")] + codexEntries.map { ($0.label, $0.label) }
+    }
+
+    func isVisibleInMenuBar(_ key: String) -> Bool {
+        menuBarVisibility[key] ?? true
+    }
+
+    func setVisibleInMenuBar(_ key: String, _ visible: Bool) {
+        menuBarVisibility[key] = visible
+    }
+
     /// 複数 Codex アカウントを保持する内部型。
     private nonisolated struct CodexEntry: Sendable {
         let label: String
@@ -41,6 +60,7 @@ final class UsageViewModel {
             }
         }
         self.pollingInterval = Self.loadPersistedInterval()
+        self.menuBarVisibility = Self.loadPersistedVisibility()
     }
 
     /// `task(id: pollingInterval)` から駆動するメインループ。
@@ -151,6 +171,7 @@ final class UsageViewModel {
     // MARK: - 永続化
 
     private static let intervalKey = "pollingInterval"
+    private static let visibilityKey = "menuBarVisibility"
 
     private static func loadPersistedInterval() -> PollingInterval {
         let raw = UserDefaults.standard.integer(forKey: intervalKey)
@@ -159,5 +180,13 @@ final class UsageViewModel {
 
     private func persistInterval() {
         UserDefaults.standard.set(pollingInterval.rawValue, forKey: Self.intervalKey)
+    }
+
+    private static func loadPersistedVisibility() -> [String: Bool] {
+        UserDefaults.standard.dictionary(forKey: visibilityKey) as? [String: Bool] ?? [:]
+    }
+
+    private func persistVisibility() {
+        UserDefaults.standard.set(menuBarVisibility, forKey: Self.visibilityKey)
     }
 }

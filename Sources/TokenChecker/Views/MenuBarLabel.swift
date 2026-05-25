@@ -1,7 +1,7 @@
 import SwiftUI
 import AppKit
 
-/// メニューバーに表示する「2 つのドーナツ + %」。
+/// メニューバーに表示する「Claude + 各 Codex アカウントのドーナツ」。
 ///
 /// SwiftUI ビューを `ImageRenderer` で NSImage に焼いて、
 /// `Image(nsImage:)` でメニューバーに渡す。
@@ -18,42 +18,47 @@ struct MenuBarLabel: View {
     }
 
     private var renderedImage: NSImage? {
-        let claude = utilization(from: viewModel.snapshot.claude)
-        // 複数アカウントのうち最も使用率が高い 5h ウィンドウをメニューバーに表示する。
-        let codex = viewModel.snapshot.codexAccounts
-            .compactMap { account -> Double? in
-                guard case .success(let usage) = account.result else { return nil }
-                return usage.fiveHour?.utilization
-            }
-            .max()
+        let showClaude = viewModel.isVisibleInMenuBar("claude")
+        let visibleCodex = viewModel.snapshot.codexAccounts.filter {
+            viewModel.isVisibleInMenuBar($0.label)
+        }
+
         let content = HStack(spacing: 6) {
-            HStack(spacing: 3) {
-                DonutChartView(
-                    value: claude ?? 0,
-                    size: 20,
-                    lineWidth: 3,
-                    center: .sfSymbol("sparkles", scale: 0.48)
-                )
-                Text(percentLabel(claude))
-                    .font(.system(size: 11, weight: .semibold))
+            if showClaude {
+                let claude = utilization(from: viewModel.snapshot.claude)
+                HStack(spacing: 3) {
+                    DonutChartView(
+                        value: claude ?? 0,
+                        size: 20,
+                        lineWidth: 3,
+                        center: .sfSymbol("sparkles", scale: 0.48)
+                    )
+                    Text(percentLabel(claude))
+                        .font(.system(size: 11, weight: .semibold))
+                }
             }
-            HStack(spacing: 3) {
-                DonutChartView(
-                    value: codex ?? 0,
-                    size: 20,
-                    lineWidth: 3,
-                    center: .sfSymbol("terminal.fill", scale: 0.48)
-                )
-                Text(percentLabel(codex))
-                    .font(.system(size: 11, weight: .semibold))
+
+            ForEach(visibleCodex, id: \.label) { account in
+                let value: Double? = {
+                    guard case .success(let usage) = account.result else { return nil }
+                    return usage.fiveHour?.utilization
+                }()
+                HStack(spacing: 3) {
+                    DonutChartView(
+                        value: value ?? 0,
+                        size: 20,
+                        lineWidth: 3,
+                        center: .sfSymbol("terminal.fill", scale: 0.48)
+                    )
+                    Text(percentLabel(value))
+                        .font(.system(size: 11, weight: .semibold))
+                }
             }
         }
         .padding(.horizontal, 2)
         .foregroundStyle(Color.primary)
 
         let renderer = ImageRenderer(content: content)
-        // ビットマップは高 DPI で焼いておく．image.size には触らない
-        // （触ると point 単位として誤認されて表示サイズまで縮んでしまう）．
         let maxScale = NSScreen.screens.map(\.backingScaleFactor).max() ?? 2
         renderer.scale = max(maxScale, 3)
         guard let image = renderer.nsImage else { return nil }
@@ -68,8 +73,6 @@ struct MenuBarLabel: View {
 
     private func percentLabel(_ value: Double?) -> String {
         guard let v = value else { return "--%" }
-        // メニューバーは横幅が限られるため 100% で頭打ちにし、超過は "+" で示す。
-        // RateLimit.utilization は仕様上 1.0 を超えうる（Anthropic API 既知挙動）。
         if v > 1.0 { return "100%+" }
         let clamped = max(0, v)
         return "\(Int((clamped * 100).rounded()))%"
